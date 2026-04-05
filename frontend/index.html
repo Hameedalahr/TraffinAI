@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TraffinAI | Smart Traffic Management</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <p class="eyebrow">Adaptive Intersection Control</p>
+        <h1>Smart Traffic Management System</h1>
+        <p class="subtitle">
+          Upload lane feeds, mark the detection regions, and let the controller
+          allocate green time with emergency preemption.
+        </p>
+      </header>
+
+      <main>
+        <section id="page-1" class="page">
+          <div class="page-head">
+            <div>
+              <p class="step">Step 1</p>
+              <h2>Upload Lane Videos</h2>
+              <p>Select one road video for each of the four lanes.</p>
+            </div>
+          </div>
+
+          <div id="upload-grid" class="card-grid"></div>
+
+          <div class="page-actions">
+            <button id="upload-next-btn" class="primary-btn" disabled>
+              Next: Draw Regions
+            </button>
+          </div>
+        </section>
+
+        <section id="page-2" class="page hidden">
+          <div class="page-head">
+            <div>
+              <p class="step">Step 2</p>
+              <h2>Draw Detection Regions</h2>
+              <p>Click to add points and double-click to close each polygon.</p>
+            </div>
+          </div>
+
+          <div id="roi-grid" class="card-grid"></div>
+
+          <div class="page-actions">
+            <button id="roi-back-btn" class="secondary-btn">Back</button>
+            <button id="roi-start-btn" class="primary-btn">
+              Start Detection
+            </button>
+          </div>
+        </section>
+
+        <section id="page-3" class="page hidden">
+          <div class="page-head">
+            <div>
+              <p class="step">Step 3</p>
+              <h2>Live Detection and Signal Control</h2>
+              <p>Live overlays update from Socket.IO without streaming annotated frames.</p>
+            </div>
+            <button id="stop-btn" class="secondary-btn">Stop System</button>
+          </div>
+
+          <div id="emergency-banner" class="emergency-banner hidden"></div>
+
+          <div class="status-board">
+            <div class="status-metric">
+              <span class="label">Cycle</span>
+              <strong id="cycle-summary">Waiting to start</strong>
+            </div>
+            <div class="status-metric">
+              <span class="label">Remaining</span>
+              <strong id="remaining-time">0s</strong>
+            </div>
+            <div class="status-metric">
+              <span class="label">Mode</span>
+              <strong id="system-mode">Normal</strong>
+            </div>
+          </div>
+
+          <div id="detection-grid" class="card-grid"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4/dist/socket.io.min.js"></script>
+    <script src="/js/app.js"></script>
+    <script src="/js/upload.js"></script>
+    <script src="/js/roi.js"></script>
+    <script src="/js/detection.js"></script>
+  </body>
+</html>
