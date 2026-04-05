@@ -55,34 +55,74 @@
           </div>
         </section>
 
-        <section id="page-3" class="page hidden">
+        <section id="page-3" class="page page-monitor hidden">
           <div class="page-head">
             <div>
               <p class="step">Step 3</p>
               <h2>Live Detection and Signal Control</h2>
               <p>Live overlays update from Socket.IO without streaming annotated frames.</p>
             </div>
-            <button id="stop-btn" class="secondary-btn">Stop System</button>
+            <div class="monitor-actions">
+              <button id="toggle-log-drawer" class="secondary-btn">Hide Logs</button>
+              <button id="stop-btn" class="secondary-btn">Stop System</button>
+            </div>
           </div>
 
           <div id="emergency-banner" class="emergency-banner hidden"></div>
 
-          <div class="status-board">
-            <div class="status-metric">
-              <span class="label">Cycle</span>
-              <strong id="cycle-summary">Waiting to start</strong>
-            </div>
-            <div class="status-metric">
-              <span class="label">Remaining</span>
-              <strong id="remaining-time">0s</strong>
-            </div>
-            <div class="status-metric">
-              <span class="label">Mode</span>
-              <strong id="system-mode">Normal</strong>
-            </div>
+          <div class="monitor-tabs">
+            <button class="tab-btn active" data-tab="live-panel">Live Grid</button>
+            <button class="tab-btn" data-tab="analytics-panel">Lane Analytics</button>
           </div>
 
-          <div id="detection-grid" class="card-grid"></div>
+          <div class="page-3-layout">
+            <div class="monitor-main">
+              <div class="status-board">
+                <div class="status-metric">
+                  <span class="label">Cycle</span>
+                  <strong id="cycle-summary">Waiting to start</strong>
+                </div>
+                <div class="status-metric">
+                  <span class="label">Remaining</span>
+                  <strong id="remaining-time">0s</strong>
+                </div>
+                <div class="status-metric">
+                  <span class="label">Mode</span>
+                  <strong id="system-mode">Normal</strong>
+                </div>
+                <div class="status-metric accent-metric">
+                  <span class="label">History Window</span>
+                  <strong id="selected-window">Last 10 minutes</strong>
+                </div>
+              </div>
+
+              <div id="live-panel" class="tab-panel active">
+                <div id="detection-grid" class="card-grid"></div>
+              </div>
+
+              <div id="analytics-panel" class="tab-panel hidden">
+                <div id="analytics-grid" class="analytics-grid"></div>
+              </div>
+            </div>
+
+            <aside id="log-drawer" class="log-drawer">
+              <div class="drawer-head">
+                <div>
+                  <p class="step">Operations</p>
+                  <h3>Lane Activity Logs</h3>
+                </div>
+                <button id="close-log-drawer" class="ghost-btn">Close</button>
+              </div>
+              <div class="filter-row">
+                <button class="filter-chip active" data-window="10">Under 10 min</button>
+                <button class="filter-chip" data-window="20">Under 20 min</button>
+                <button class="filter-chip" data-window="30">Under 30 min</button>
+                <button class="filter-chip" data-window="40">Under 40 min</button>
+              </div>
+              <div id="lane-summary-list" class="lane-summary-list"></div>
+              <div id="history-list" class="history-list"></div>
+            </aside>
+          </div>
         </section>
       </main>
     </div>

@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import json
 import multiprocessing as mp
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,24 @@ class ROIPayload(BaseModel):
     rois: list[ROIEntry]
 
 
+def default_lane_summary() -> dict[str, Any]:
+    return {
+        "green_count": 0,
+        "total_vehicles_passed": 0,
+        "emergency_count": 0,
+        "class_totals": {
+            "car": 0,
+            "truck": 0,
+            "bus": 0,
+            "auto_rickshaw": 0,
+            "motorcycle": 0,
+            "bicycle": 0,
+            "emergency_vehicle": 0,
+        },
+        "last_green_at": None,
+    }
+
+
 def ensure_directories() -> None:
     config.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     config.ROI_DIR.mkdir(parents=True, exist_ok=True)
@@ -53,6 +72,9 @@ def create_app_state() -> dict[str, Any]:
         "priority_scores": {lane_id: 0.0 for lane_id in range(config.LANE_COUNT)},
         "wait_started_at": {lane_id: 0.0 for lane_id in range(config.LANE_COUNT)},
         "last_green_lane": None,
+        "lane_summaries": {lane_id: default_lane_summary() for lane_id in range(config.LANE_COUNT)},
+        "history": [],
+        "last_count_snapshots": {lane_id: {} for lane_id in range(config.LANE_COUNT)},
         "signal_states": ["red"] * config.LANE_COUNT,
         "active_lane": 0,
         "remaining_seconds": 0,
@@ -147,6 +169,55 @@ def normalize_polygon(entry: ROIEntry) -> list[list[float]]:
     return normalized
 
 
+def append_history(event_type: str, lane_id: int, message: str, details: dict[str, Any] | None = None) -> None:
+    entry = {
+        "id": str(uuid.uuid4()),
+        "timestamp": time.time(),
+        "lane_id": lane_id,
+        "event_type": event_type,
+        "message": message,
+        "details": details or {},
+    }
+    app_state["history"].append(entry)
+    app_state["history"] = app_state["history"][-300:]
+
+
+def get_lane_summaries() -> list[dict[str, Any]]:
+    return [
+        {
+            "lane_id": lane_id,
+            **app_state["lane_summaries"].get(lane_id, default_lane_summary()),
+        }
+        for lane_id in range(config.LANE_COUNT)
+    ]
+
+
+def update_vehicle_history(lane_id: int, counts: dict[str, int]) -> bool:
+    previous = app_state["last_count_snapshots"].get(lane_id, {})
+    summary = app_state["lane_summaries"][lane_id]
+    positive_delta_total = 0
+    delta_counts: dict[str, int] = {}
+
+    for class_name, count in counts.items():
+        delta = max(0, count - previous.get(class_name, 0))
+        if delta > 0:
+            delta_counts[class_name] = delta
+            positive_delta_total += delta
+            summary["class_totals"][class_name] = summary["class_totals"].get(class_name, 0) + delta
+
+    if positive_delta_total > 0:
+        summary["total_vehicles_passed"] += positive_delta_total
+        append_history(
+            "vehicle_flow",
+            lane_id,
+            f"Lane {lane_id + 1} observed {positive_delta_total} additional vehicles",
+            {"delta_counts": delta_counts, "total_vehicles_passed": summary["total_vehicles_passed"]},
+        )
+
+    app_state["last_count_snapshots"][lane_id] = dict(counts)
+    return positive_delta_total > 0
+
+
 async def ws_broadcast_loop() -> None:
     while app_state["running"] and app_state["ws_queue"] is not None:
         try:
@@ -155,6 +226,38 @@ async def ws_broadcast_loop() -> None:
             await asyncio.sleep(0.05)
             continue
 
+        event_name = payload.get("event")
+        if event_name == "detection_frame":
+            changed = update_vehicle_history(payload["lane_id"], payload.get("counts", {}))
+            if changed:
+                await sio.emit(
+                    "history_update",
+                    {
+                        "history": app_state["history"][-200:],
+                        "lane_summaries": get_lane_summaries(),
+                    },
+                )
+        elif event_name == "emergency_alert":
+            lane_id = payload["lane_id"]
+            app_state["lane_summaries"][lane_id]["emergency_count"] += 1
+            append_history(
+                "emergency",
+                lane_id,
+                f"Emergency vehicle detected on Lane {lane_id + 1}",
+                {
+                    "vehicle_class": payload.get("vehicle_class"),
+                    "confidence": payload.get("confidence"),
+                },
+            )
+            await sio.emit(
+                "history_update",
+                {
+                    "history": app_state["history"][-200:],
+                    "lane_summaries": get_lane_summaries(),
+                },
+            )
+
+        payload = dict(payload)
         event_name = payload.pop("event", None)
         if event_name:
             await sio.emit(event_name, payload)
@@ -290,6 +393,9 @@ async def start_detection():
     start_ts = asyncio.get_running_loop().time()
     app_state["wait_started_at"] = {lane_id: start_ts for lane_id in range(config.LANE_COUNT)}
     app_state["last_green_lane"] = None
+    app_state["lane_summaries"] = {lane_id: default_lane_summary() for lane_id in range(config.LANE_COUNT)}
+    app_state["history"] = []
+    app_state["last_count_snapshots"] = {lane_id: {} for lane_id in range(config.LANE_COUNT)}
     app_state["signal_states"] = ["red"] * config.LANE_COUNT
     app_state["active_lane"] = 0
     app_state["remaining_seconds"] = 0
@@ -376,6 +482,8 @@ async def get_status():
         "emergency_active": app_state["emergency_active"],
         "emergency_lane": app_state["emergency_lane"],
         "counts": [app_state["counts"].get(i, {}) for i in range(config.LANE_COUNT)],
+        "lane_summaries": get_lane_summaries(),
+        "history": app_state["history"][-200:],
         "video_urls": [app_state["video_urls"].get(i) for i in range(config.LANE_COUNT)],
         "frame_urls": [f"/api/frame/{i}" if i in app_state["frame_paths"] else None for i in range(config.LANE_COUNT)],
     }

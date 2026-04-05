@@ -5,6 +5,13 @@
   const systemMode = document.getElementById("system-mode");
   const emergencyBanner = document.getElementById("emergency-banner");
   const stopButton = document.getElementById("stop-btn");
+  const analyticsGrid = document.getElementById("analytics-grid");
+  const laneSummaryList = document.getElementById("lane-summary-list");
+  const historyList = document.getElementById("history-list");
+  const selectedWindow = document.getElementById("selected-window");
+  const logDrawer = document.getElementById("log-drawer");
+  const toggleLogDrawer = document.getElementById("toggle-log-drawer");
+  const closeLogDrawer = document.getElementById("close-log-drawer");
   let initialized = false;
 
   const classColors = {
@@ -17,6 +24,99 @@
     bicycle: "#7F77DD",
   };
   const countClasses = ["car", "truck", "bus", "auto_rickshaw", "motorcycle", "bicycle", "emergency_vehicle"];
+
+  function formatClock(timestamp) {
+    if (!timestamp) {
+      return "Never";
+    }
+    return new Date(timestamp * 1000).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  }
+
+  function getFilteredHistory() {
+    const minutes = window.AppState.selectedHistoryWindow;
+    const cutoff = Date.now() - minutes * 60 * 1000;
+    return (window.AppState.history || []).filter((item) => item.timestamp * 1000 >= cutoff);
+  }
+
+  function renderHistoryDrawer() {
+    const filteredHistory = getFilteredHistory()
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 80);
+
+    selectedWindow.textContent = `Last ${window.AppState.selectedHistoryWindow} minutes`;
+
+    laneSummaryList.innerHTML = (window.AppState.laneSummaries || [])
+      .map((summary) => `
+        <article class="lane-summary-card">
+          <div class="lane-summary-header">
+            <strong>Lane ${summary.lane_id + 1}</strong>
+            <span class="time-stamp">Last green: ${formatClock(summary.last_green_at)}</span>
+          </div>
+          <div class="lane-summary-meta">
+            <span class="meta-pill">Green cycles: ${summary.green_count}</span>
+            <span class="meta-pill">Vehicles passed: ${summary.total_vehicles_passed}</span>
+            <span class="meta-pill">Emergency alerts: ${summary.emergency_count}</span>
+          </div>
+        </article>
+      `)
+      .join("");
+
+    historyList.innerHTML = filteredHistory.length
+      ? filteredHistory
+          .map((item) => `
+            <article class="history-item">
+              <div class="history-item-head">
+                <strong>Lane ${item.lane_id + 1} · ${item.event_type.replaceAll("_", " ")}</strong>
+                <span class="time-stamp">${formatClock(item.timestamp)}</span>
+              </div>
+              <p>${item.message}</p>
+            </article>
+          `)
+          .join("")
+      : `<article class="history-item"><p>No history in this time window yet.</p></article>`;
+  }
+
+  function renderAnalytics() {
+    analyticsGrid.innerHTML = (window.AppState.laneSummaries || [])
+      .map((summary) => {
+        const classRows = countClasses
+          .map((className) => {
+            const label = className.replaceAll("_", " ");
+            const value = summary.class_totals?.[className] || 0;
+            return `<div class="analytics-row"><span>${label}</span><strong>${value}</strong></div>`;
+          })
+          .join("");
+
+        return `
+          <article class="analytics-card">
+            <h4>Lane ${summary.lane_id + 1}</h4>
+            <div class="analytics-list">
+              <div class="analytics-row"><span>Green cycles</span><strong>${summary.green_count}</strong></div>
+              <div class="analytics-row"><span>Total vehicles passed</span><strong>${summary.total_vehicles_passed}</strong></div>
+              <div class="analytics-row"><span>Emergency detections</span><strong>${summary.emergency_count}</strong></div>
+              <div class="analytics-row"><span>Last green</span><strong>${formatClock(summary.last_green_at)}</strong></div>
+              ${classRows}
+            </div>
+          </article>
+        `;
+      })
+      .join("");
+  }
+
+  function hydrateHistory(data) {
+    if (data.history) {
+      window.AppState.history = data.history;
+    }
+    if (data.lane_summaries) {
+      window.AppState.laneSummaries = data.lane_summaries;
+    }
+    renderHistoryDrawer();
+    renderAnalytics();
+  }
 
   function formatWait(seconds, laneIndex) {
     if (window.AppState.activeLane === laneIndex && !window.AppState.emergencyActive) {
@@ -137,6 +237,7 @@
     window.AppState.waitingTimes = data.waiting_times || [0, 0, 0, 0];
     window.AppState.priorityScores = data.priority_scores || [0, 0, 0, 0];
     window.AppState.emergencyActive = data.emergency_active;
+    hydrateHistory(data);
 
     data.signal_states.forEach((state, laneIndex) => updateTrafficLight(laneIndex, state));
     data.scores.forEach((score, laneIndex) => {
@@ -193,6 +294,9 @@
       scores: status.scores,
       green_times: status.green_times,
       waiting_times: status.waiting_times,
+      priority_scores: status.priority_scores,
+      lane_summaries: status.lane_summaries,
+      history: status.history,
       emergency_active: status.emergency_active,
     });
     (status.counts || []).forEach((counts, laneIndex) => {
@@ -225,6 +329,9 @@
           scores: status.scores,
           green_times: status.green_times,
           waiting_times: status.waiting_times,
+          priority_scores: status.priority_scores,
+          lane_summaries: status.lane_summaries,
+          history: status.history,
           emergency_active: status.emergency_active,
         });
         (status.counts || []).forEach((counts, laneIndex) => {
@@ -240,6 +347,7 @@
       window.AppState.socket = io(window.location.origin);
       window.AppState.socket.on("detection_frame", onDetectionFrame);
       window.AppState.socket.on("signal_update", applySignalUpdate);
+      window.AppState.socket.on("history_update", hydrateHistory);
       window.AppState.socket.on("timer_tick", (data) => {
         remainingTime.textContent = `${data.remaining_seconds}s`;
         systemMode.textContent = data.emergency_active ? "Emergency Override" : "Normal";
@@ -256,6 +364,34 @@
       window.AppState.socket.emit("request_status", { event: "request_status" });
     }
   };
+
+  document.querySelectorAll(".tab-btn").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll(".tab-btn").forEach((item) => item.classList.remove("active"));
+      document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.add("hidden"));
+      button.classList.add("active");
+      document.getElementById(button.dataset.tab).classList.remove("hidden");
+    });
+  });
+
+  document.querySelectorAll(".filter-chip").forEach((button) => {
+    button.addEventListener("click", () => {
+      window.AppState.selectedHistoryWindow = Number(button.dataset.window);
+      document.querySelectorAll(".filter-chip").forEach((item) => item.classList.remove("active"));
+      button.classList.add("active");
+      renderHistoryDrawer();
+    });
+  });
+
+  toggleLogDrawer.addEventListener("click", () => {
+    logDrawer.classList.toggle("closed");
+    toggleLogDrawer.textContent = logDrawer.classList.contains("closed") ? "Open Logs" : "Hide Logs";
+  });
+
+  closeLogDrawer.addEventListener("click", () => {
+    logDrawer.classList.add("closed");
+    toggleLogDrawer.textContent = "Open Logs";
+  });
 
   stopButton.addEventListener("click", async () => {
     try {

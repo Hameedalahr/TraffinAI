@@ -91,6 +91,14 @@ def build_signal_payload(app_state: dict[str, Any]) -> dict[str, Any]:
         "green_times": ordered_green_times,
         "waiting_times": ordered_waiting_times,
         "priority_scores": ordered_priority_scores,
+        "lane_summaries": [
+            {
+                "lane_id": lane_id,
+                **app_state["lane_summaries"].get(lane_id, {}),
+            }
+            for lane_id in range(config.LANE_COUNT)
+        ],
+        "history": app_state["history"][-200:],
         "emergency_active": app_state["emergency_active"],
         "emergency_lane": app_state["emergency_lane"],
         "timestamp": time.time(),
@@ -188,8 +196,40 @@ async def signal_controller_loop(
         app_state["emergency_active"] = False
         app_state["emergency_lane"] = None
         app_state["waiting_times"] = compute_waiting_times(app_state["wait_started_at"], active_lane)
+        summary = app_state["lane_summaries"][active_lane]
+        summary["green_count"] += 1
+        summary["last_green_at"] = time.time()
+        app_state["history"].append(
+            {
+                "id": f"green-{active_lane}-{summary['green_count']}-{int(summary['last_green_at'])}",
+                "timestamp": summary["last_green_at"],
+                "lane_id": active_lane,
+                "event_type": "green_start",
+                "message": f"Lane {active_lane + 1} received green signal",
+                "details": {
+                    "green_count": summary["green_count"],
+                    "allocated_green_time": green_times[active_lane],
+                    "priority_score": priority_scores.get(active_lane, 0.0),
+                    "traffic_score": scores.get(active_lane, 0.0),
+                },
+            }
+        )
+        app_state["history"] = app_state["history"][-300:]
 
         await socketio_server.emit("signal_update", build_signal_payload(app_state))
+        await socketio_server.emit(
+            "history_update",
+            {
+                "history": app_state["history"][-200:],
+                "lane_summaries": [
+                    {
+                        "lane_id": lane_id,
+                        **app_state["lane_summaries"].get(lane_id, {}),
+                    }
+                    for lane_id in range(config.LANE_COUNT)
+                ],
+            },
+        )
 
         duration = green_times[active_lane]
         for remaining in range(duration, 0, -1):
