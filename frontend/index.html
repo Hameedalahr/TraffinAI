@@ -73,10 +73,11 @@
           <div class="monitor-tabs">
             <button class="tab-btn active" data-tab="live-panel">Live Grid</button>
             <button class="tab-btn" data-tab="analytics-panel">Lane Analytics</button>
+            <button class="tab-btn" data-tab="config-panel">Config</button>
           </div>
 
           <div class="page-3-layout">
-            <div class="monitor-main">
+            <div id="monitor-main" class="monitor-main">
               <div class="status-board">
                 <div class="status-metric">
                   <span class="label">Cycle</span>
@@ -102,6 +103,21 @@
 
               <div id="analytics-panel" class="tab-panel hidden">
                 <div id="analytics-grid" class="analytics-grid"></div>
+              </div>
+
+              <div id="config-panel" class="tab-panel hidden">
+                <div class="config-shell">
+                  <div class="config-head">
+                    <div>
+                      <p class="step">Runtime Controls</p>
+                      <h3>Traffic Model Configuration</h3>
+                      <p class="subtitle">Tune signal math live and save detection settings for the next run.</p>
+                    </div>
+                    <button id="save-config-btn" class="primary-btn">Save Config</button>
+                  </div>
+                  <div id="config-message" class="config-message hidden"></div>
+                  <form id="config-form" class="config-grid"></form>
+                </div>
               </div>
             </div>
 

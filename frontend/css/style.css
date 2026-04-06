@@ -376,19 +376,21 @@ button:disabled {
 
 .monitor-main {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .log-drawer {
-  position: sticky;
-  top: 16px;
   background: rgba(8, 19, 36, 0.94);
   border: 1px solid var(--line);
   border-radius: 24px;
   padding: 20px;
   box-shadow: var(--shadow);
-  max-height: calc(100vh - 160px);
-  overflow-y: auto;
-  overflow-x: hidden;
+  height: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .log-drawer.closed {
@@ -407,6 +409,10 @@ button:disabled {
 .analytics-grid {
   display: grid;
   gap: 14px;
+}
+
+.lane-summary-list {
+  flex: 0 0 auto;
 }
 
 .filter-row {
@@ -485,6 +491,85 @@ button:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.config-shell {
+  background: rgba(10, 24, 44, 0.68);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 20px;
+}
+
+.config-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.config-card {
+  display: grid;
+  gap: 8px;
+  background: rgba(14, 32, 58, 0.8);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 14px;
+}
+
+.config-group {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.7rem;
+  color: var(--brand);
+}
+
+.config-label {
+  font-weight: 700;
+}
+
+.config-input {
+  width: 100%;
+  background: rgba(7, 17, 31, 0.8);
+  color: var(--text);
+  border: 1px solid rgba(130, 178, 255, 0.18);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.config-input:disabled {
+  opacity: 0.7;
+}
+
+.config-note {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.config-card-disabled {
+  opacity: 0.82;
+}
+
+.config-message {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(91, 212, 176, 0.12);
+  border: 1px solid rgba(91, 212, 176, 0.22);
+  color: #d6fff3;
+}
+
+.config-message.error {
+  background: rgba(226, 75, 74, 0.12);
+  border-color: rgba(226, 75, 74, 0.28);
+  color: #ffd3d2;
+}
+
 .analytics-card h4 {
   margin: 0 0 10px;
   font-size: 1rem;
@@ -506,6 +591,12 @@ button:disabled {
   margin-top: 18px;
   padding-top: 18px;
   border-top: 1px solid rgba(130, 178, 255, 0.12);
+  flex: 1 1 auto;
+  align-content: start;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;
+  min-height: 0;
 }
 
 .history-item {
@@ -577,13 +668,14 @@ button:disabled {
   }
 
   .page-3-layout,
-  .analytics-grid {
+  .analytics-grid,
+  .config-grid {
     grid-template-columns: 1fr;
   }
 
   .log-drawer {
-    position: static;
-    max-height: none;
+    min-height: auto;
+    height: auto !important;
   }
 
   .filter-row,

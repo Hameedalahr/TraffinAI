@@ -6,12 +6,16 @@
   const emergencyBanner = document.getElementById("emergency-banner");
   const stopButton = document.getElementById("stop-btn");
   const analyticsGrid = document.getElementById("analytics-grid");
+  const monitorMain = document.getElementById("monitor-main");
   const laneSummaryList = document.getElementById("lane-summary-list");
   const historyList = document.getElementById("history-list");
   const selectedWindow = document.getElementById("selected-window");
   const logDrawer = document.getElementById("log-drawer");
   const toggleLogDrawer = document.getElementById("toggle-log-drawer");
   const closeLogDrawer = document.getElementById("close-log-drawer");
+  const configForm = document.getElementById("config-form");
+  const saveConfigButton = document.getElementById("save-config-btn");
+  const configMessage = document.getElementById("config-message");
   let initialized = false;
 
   const classColors = {
@@ -24,6 +28,24 @@
     bicycle: "#7F77DD",
   };
   const countClasses = ["car", "truck", "bus", "auto_rickshaw", "motorcycle", "bicycle", "emergency_vehicle"];
+  const numericConfigFields = [
+    ["G_TOTAL", "Total cycle budget (s)", "Signal math", "number", "Applied live"],
+    ["G_MIN", "Minimum green per lane (s)", "Signal math", "number", "Applied live"],
+    ["G_EMERGENCY", "Emergency green hold (s)", "Signal math", "number", "Applied live"],
+    ["YELLOW_DURATION", "Yellow transition (s)", "Signal math", "number", "Applied live"],
+    ["WAIT_TIME_WEIGHT", "Wait-time weight", "Fairness", "number", "Applied live"],
+    ["FRAME_SKIP", "Frame skip", "Detection", "number", "Requires restart"],
+    ["CONFIDENCE_THRESH", "Confidence threshold", "Detection", "number", "Requires restart"],
+    ["IOU_NMS_THRESH", "NMS IoU threshold", "Detection", "number", "Requires restart"],
+  ];
+  const weightFields = [
+    ["truck", "Truck weight"],
+    ["bus", "Bus weight"],
+    ["car", "Car weight"],
+    ["auto_rickshaw", "Auto-rickshaw weight"],
+    ["motorcycle", "Motorcycle weight"],
+    ["bicycle", "Bicycle weight"],
+  ];
 
   function formatClock(timestamp) {
     if (!timestamp) {
@@ -34,6 +56,96 @@
       minute: "2-digit",
       second: "2-digit",
     });
+  }
+
+  function showConfigMessage(message, isError = false) {
+    configMessage.textContent = message;
+    configMessage.classList.remove("hidden", "error");
+    if (isError) {
+      configMessage.classList.add("error");
+    }
+  }
+
+  function renderConfigForm(configData) {
+    if (!configForm || !configData) {
+      return;
+    }
+    window.AppState.runtimeConfig = configData;
+
+    const fieldsHtml = numericConfigFields
+      .map(
+        ([key, label, group, type, note]) => `
+          <label class="config-card">
+            <span class="config-group">${group}</span>
+            <span class="config-label">${label}</span>
+            <input class="config-input" name="${key}" type="${type}" step="any" value="${configData[key]}" />
+            <span class="config-note">${note}</span>
+          </label>
+        `,
+      )
+      .join("");
+
+    const weightsHtml = weightFields
+      .map(
+        ([key, label]) => `
+          <label class="config-card">
+            <span class="config-group">Vehicle weights</span>
+            <span class="config-label">${label}</span>
+            <input class="config-input" name="weight_${key}" type="number" step="any" value="${configData.VEHICLE_WEIGHTS[key]}" />
+            <span class="config-note">Applied live</span>
+          </label>
+        `,
+      )
+      .join("");
+
+    configForm.innerHTML = `
+      ${fieldsHtml}
+      <label class="config-card config-card-toggle">
+        <span class="config-group">Fairness</span>
+        <span class="config-label">Block consecutive greens</span>
+        <select class="config-input" name="BLOCK_CONSECUTIVE_GREEN">
+          <option value="true" ${configData.BLOCK_CONSECUTIVE_GREEN ? "selected" : ""}>Enabled</option>
+          <option value="false" ${!configData.BLOCK_CONSECUTIVE_GREEN ? "selected" : ""}>Disabled</option>
+        </select>
+        <span class="config-note">Applied live</span>
+      </label>
+      ${weightsHtml}
+      <label class="config-card config-card-disabled">
+        <span class="config-group">Reserved</span>
+        <span class="config-label">Emergency vehicle weight</span>
+        <input class="config-input" value="Hard override" disabled />
+        <span class="config-note">Always excluded from score</span>
+      </label>
+    `;
+  }
+
+  async function loadRuntimeConfig() {
+    const response = await window.fetchJson("/api/config");
+    renderConfigForm(response.config);
+  }
+
+  function readConfigPayload() {
+    const form = new FormData(configForm);
+    return {
+      G_TOTAL: Number(form.get("G_TOTAL")),
+      G_MIN: Number(form.get("G_MIN")),
+      G_EMERGENCY: Number(form.get("G_EMERGENCY")),
+      YELLOW_DURATION: Number(form.get("YELLOW_DURATION")),
+      WAIT_TIME_WEIGHT: Number(form.get("WAIT_TIME_WEIGHT")),
+      BLOCK_CONSECUTIVE_GREEN: form.get("BLOCK_CONSECUTIVE_GREEN") === "true",
+      FRAME_SKIP: Number(form.get("FRAME_SKIP")),
+      CONFIDENCE_THRESH: Number(form.get("CONFIDENCE_THRESH")),
+      IOU_NMS_THRESH: Number(form.get("IOU_NMS_THRESH")),
+      VEHICLE_WEIGHTS: {
+        truck: Number(form.get("weight_truck")),
+        bus: Number(form.get("weight_bus")),
+        car: Number(form.get("weight_car")),
+        auto_rickshaw: Number(form.get("weight_auto_rickshaw")),
+        motorcycle: Number(form.get("weight_motorcycle")),
+        bicycle: Number(form.get("weight_bicycle")),
+        emergency_vehicle: null,
+      },
+    };
   }
 
   function getFilteredHistory() {
@@ -107,6 +219,20 @@
       .join("");
   }
 
+  function syncLogDrawerHeight() {
+    if (!monitorMain || !logDrawer || window.innerWidth <= 900 || logDrawer.classList.contains("closed")) {
+      if (logDrawer) {
+        logDrawer.style.height = "";
+      }
+      return;
+    }
+
+    const mainHeight = monitorMain.getBoundingClientRect().height;
+    if (mainHeight > 0) {
+      logDrawer.style.height = `${Math.round(mainHeight)}px`;
+    }
+  }
+
   function hydrateHistory(data) {
     if (data.history) {
       window.AppState.history = data.history;
@@ -116,6 +242,10 @@
     }
     renderHistoryDrawer();
     renderAnalytics();
+    syncLogDrawerHeight();
+    if (data.runtime_config) {
+      renderConfigForm(data.runtime_config);
+    }
   }
 
   function formatWait(seconds, laneIndex) {
@@ -314,7 +444,9 @@
   window.initDetectionPage = async function initDetectionPage() {
     if (!initialized) {
       buildDetectionCards();
+      await loadRuntimeConfig();
       initialized = true;
+      syncLogDrawerHeight();
     }
 
     try {
@@ -371,6 +503,7 @@
       document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.add("hidden"));
       button.classList.add("active");
       document.getElementById(button.dataset.tab).classList.remove("hidden");
+      setTimeout(syncLogDrawerHeight, 0);
     });
   });
 
@@ -380,17 +513,40 @@
       document.querySelectorAll(".filter-chip").forEach((item) => item.classList.remove("active"));
       button.classList.add("active");
       renderHistoryDrawer();
+      syncLogDrawerHeight();
     });
   });
 
   toggleLogDrawer.addEventListener("click", () => {
     logDrawer.classList.toggle("closed");
     toggleLogDrawer.textContent = logDrawer.classList.contains("closed") ? "Open Logs" : "Hide Logs";
+    setTimeout(syncLogDrawerHeight, 0);
   });
 
   closeLogDrawer.addEventListener("click", () => {
     logDrawer.classList.add("closed");
     toggleLogDrawer.textContent = "Open Logs";
+    syncLogDrawerHeight();
+  });
+
+  saveConfigButton.addEventListener("click", async () => {
+    try {
+      saveConfigButton.disabled = true;
+      saveConfigButton.textContent = "Saving...";
+      const payload = readConfigPayload();
+      const response = await window.fetchJson("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      renderConfigForm(response.config);
+      showConfigMessage(response.message || "Configuration updated.");
+    } catch (error) {
+      showConfigMessage(error.message, true);
+    } finally {
+      saveConfigButton.disabled = false;
+      saveConfigButton.textContent = "Save Config";
+    }
   });
 
   stopButton.addEventListener("click", async () => {
@@ -412,5 +568,9 @@
     } catch (error) {
       window.showError(error.message);
     }
+  });
+
+  window.addEventListener("resize", () => {
+    syncLogDrawerHeight();
   });
 })();

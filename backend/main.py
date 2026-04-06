@@ -31,6 +31,19 @@ class ROIPayload(BaseModel):
     rois: list[ROIEntry]
 
 
+class RuntimeConfigPayload(BaseModel):
+    G_TOTAL: int
+    G_MIN: int
+    G_EMERGENCY: int
+    YELLOW_DURATION: int
+    WAIT_TIME_WEIGHT: float
+    BLOCK_CONSECUTIVE_GREEN: bool
+    FRAME_SKIP: int
+    CONFIDENCE_THRESH: float
+    IOU_NMS_THRESH: float
+    VEHICLE_WEIGHTS: dict[str, float | None]
+
+
 def default_lane_summary() -> dict[str, Any]:
     return {
         "green_count": 0,
@@ -55,6 +68,61 @@ def ensure_directories() -> None:
     config.FRAMES_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def get_runtime_config_snapshot() -> dict[str, Any]:
+    return {
+        "G_TOTAL": config.G_TOTAL,
+        "G_MIN": config.G_MIN,
+        "G_EMERGENCY": config.G_EMERGENCY,
+        "YELLOW_DURATION": config.YELLOW_DURATION,
+        "WAIT_TIME_WEIGHT": config.WAIT_TIME_WEIGHT,
+        "BLOCK_CONSECUTIVE_GREEN": config.BLOCK_CONSECUTIVE_GREEN,
+        "FRAME_SKIP": config.FRAME_SKIP,
+        "CONFIDENCE_THRESH": config.CONFIDENCE_THRESH,
+        "IOU_NMS_THRESH": config.IOU_NMS_THRESH,
+        "VEHICLE_WEIGHTS": dict(config.VEHICLE_WEIGHTS),
+    }
+
+
+def apply_runtime_config(new_config: dict[str, Any]) -> None:
+    config.G_TOTAL = int(new_config["G_TOTAL"])
+    config.G_MIN = int(new_config["G_MIN"])
+    config.G_EMERGENCY = int(new_config["G_EMERGENCY"])
+    config.YELLOW_DURATION = int(new_config["YELLOW_DURATION"])
+    config.WAIT_TIME_WEIGHT = float(new_config["WAIT_TIME_WEIGHT"])
+    config.BLOCK_CONSECUTIVE_GREEN = bool(new_config["BLOCK_CONSECUTIVE_GREEN"])
+    config.FRAME_SKIP = int(new_config["FRAME_SKIP"])
+    config.CONFIDENCE_THRESH = float(new_config["CONFIDENCE_THRESH"])
+    config.IOU_NMS_THRESH = float(new_config["IOU_NMS_THRESH"])
+    config.VEHICLE_WEIGHTS = dict(new_config["VEHICLE_WEIGHTS"])
+
+
+def validate_runtime_config(payload: RuntimeConfigPayload) -> dict[str, Any]:
+    data = payload.model_dump()
+    if data["G_TOTAL"] <= 0:
+        raise HTTPException(status_code=400, detail="G_TOTAL must be positive")
+    if data["G_MIN"] <= 0:
+        raise HTTPException(status_code=400, detail="G_MIN must be positive")
+    if data["G_TOTAL"] < config.LANE_COUNT * data["G_MIN"]:
+        raise HTTPException(status_code=400, detail="G_TOTAL must be at least lane_count * G_MIN")
+    if data["G_EMERGENCY"] <= 0 or data["YELLOW_DURATION"] <= 0:
+        raise HTTPException(status_code=400, detail="Emergency and yellow durations must be positive")
+    if data["FRAME_SKIP"] < 1:
+        raise HTTPException(status_code=400, detail="FRAME_SKIP must be at least 1")
+    if not 0.0 <= data["CONFIDENCE_THRESH"] <= 1.0:
+        raise HTTPException(status_code=400, detail="CONFIDENCE_THRESH must be between 0 and 1")
+    if not 0.0 <= data["IOU_NMS_THRESH"] <= 1.0:
+        raise HTTPException(status_code=400, detail="IOU_NMS_THRESH must be between 0 and 1")
+    if data["WAIT_TIME_WEIGHT"] < 0:
+        raise HTTPException(status_code=400, detail="WAIT_TIME_WEIGHT must be non-negative")
+
+    required_weights = {"truck", "bus", "car", "auto_rickshaw", "motorcycle", "bicycle", "emergency_vehicle"}
+    if set(data["VEHICLE_WEIGHTS"].keys()) != required_weights:
+        raise HTTPException(status_code=400, detail="VEHICLE_WEIGHTS must include all required classes")
+    if data["VEHICLE_WEIGHTS"]["emergency_vehicle"] is not None:
+        raise HTTPException(status_code=400, detail="emergency_vehicle weight must stay null")
+    return data
+
+
 def create_app_state() -> dict[str, Any]:
     return {
         "running": False,
@@ -75,6 +143,7 @@ def create_app_state() -> dict[str, Any]:
         "lane_summaries": {lane_id: default_lane_summary() for lane_id in range(config.LANE_COUNT)},
         "history": [],
         "last_count_snapshots": {lane_id: {} for lane_id in range(config.LANE_COUNT)},
+        "runtime_config": get_runtime_config_snapshot(),
         "signal_states": ["red"] * config.LANE_COUNT,
         "active_lane": 0,
         "remaining_seconds": 0,
@@ -317,6 +386,41 @@ def require_ready_to_start() -> None:
         raise HTTPException(status_code=400, detail="Save ROI polygons for all four lanes before starting detection")
 
 
+@fastapi_app.get("/api/config")
+async def get_runtime_config():
+    return {
+        "config": get_runtime_config_snapshot(),
+        "notes": {
+            "live_fields": [
+                "G_TOTAL",
+                "G_MIN",
+                "G_EMERGENCY",
+                "YELLOW_DURATION",
+                "WAIT_TIME_WEIGHT",
+                "BLOCK_CONSECUTIVE_GREEN",
+                "VEHICLE_WEIGHTS",
+            ],
+            "restart_required_fields": [
+                "FRAME_SKIP",
+                "CONFIDENCE_THRESH",
+                "IOU_NMS_THRESH",
+            ],
+        },
+    }
+
+
+@fastapi_app.post("/api/config")
+async def update_runtime_config(payload: RuntimeConfigPayload):
+    new_config = validate_runtime_config(payload)
+    apply_runtime_config(new_config)
+    app_state["runtime_config"] = get_runtime_config_snapshot()
+    return {
+        "status": "ok",
+        "config": app_state["runtime_config"],
+        "message": "Signal settings applied. Detection settings affect new worker processes after restart.",
+    }
+
+
 @fastapi_app.post("/api/upload")
 async def upload_video(video: UploadFile = File(...), lane_id: int = Form(...)):
     validate_lane_id(lane_id)
@@ -484,6 +588,7 @@ async def get_status():
         "counts": [app_state["counts"].get(i, {}) for i in range(config.LANE_COUNT)],
         "lane_summaries": get_lane_summaries(),
         "history": app_state["history"][-200:],
+        "runtime_config": app_state["runtime_config"],
         "video_urls": [app_state["video_urls"].get(i) for i in range(config.LANE_COUNT)],
         "frame_urls": [f"/api/frame/{i}" if i in app_state["frame_paths"] else None for i in range(config.LANE_COUNT)],
     }

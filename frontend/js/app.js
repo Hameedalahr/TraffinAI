@@ -22,6 +22,7 @@ window.AppState = {
   laneSummaries: [],
   history: [],
   selectedHistoryWindow: 10,
+  runtimeConfig: null,
   activeLane: -1,
   remainingSeconds: 0,
   emergencyActive: false,
